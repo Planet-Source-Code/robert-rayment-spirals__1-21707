@@ -1,0 +1,525 @@
+     1                                  ;MCRotat.asm  by Robert Rayment
+     2                                  
+     3                                  ;VB
+     4                                  ;res& = CallWindowProc(ptmc&, ptbuff&, rand&, ptzang, OpCode&)
+     5                                  ;                             8        12     16      20
+     6                                  ;Fill BITDATA structure
+     7                                  ;Private Type BITDATA
+     8                                  ; bmp.bmWidth = 256          'Pixel width
+     9                                  ; bmp.bmHeight = 256         'Pixel height
+    10                                  ; bmp.ptrFrontSurf = VarPtr(FrontSurf(1,1)) 'Pointer to Front surface
+    11                                  ; bmp.ptrBackSurf = VarPtr(BackSurf(1,1))   ' Pointer to Back surface
+    12                                  ;Dim bmp As BITDATA
+    13                                  
+    14                                  %macro movab 2		;name & num of parameters
+    15                                    push dword %2		;2nd param
+    16                                    pop dword %1		;1st param
+    17                                  %endmacro			;use  movab %1,%2
+    18                                  ;Allows eg	movab bmW,[ebx+4]
+    19                                  
+    20                                  %define bmW   [ebp-4]	;Surfaces width eg 256
+    21                                  %define bmH   [ebp-8]	;Surfaces height eg 256
+    22                                  %define bmFS  [ebp-12]	;pointer to Front Surface
+    23                                  %define bmBS  [ebp-16]	;pointer to Back Surface
+    24                                  
+    25                                  %define lo32 [ebp-20]
+    26                                  %define hi32 [ebp-24]
+    27                                  
+    28                                  %define irand [ebp-28]	;random number 0-255
+    29                                  
+    30                                  %define ix    [ebp-32]
+    31                                  %define iy    [ebp-36]
+    32                                  %define zA    [ebp-40]
+    33                                  %define zang  [ebp-44]
+    34                                  %define ixc   [ebp-48]
+    35                                  %define iyc   [ebp-52]
+    36                                  %define ixs   [ebp-56]
+    37                                  %define iys   [ebp-60]
+    38                                  %define zCos  [ebp-64]
+    39                                  %define zSin  [ebp-68]
+    40                                  %define zangStep  [ebp-72]
+    41                                  %define zangLim   [ebp-76]
+    42                                  %define intzang   [ebp-80]	;Int(zang)
+    43                                  
+    44                                  [bits 32]
+    45                                  
+    46 00000000 55                      	push ebp
+    47 00000001 89E5                    	mov ebp,esp
+    48 00000003 81EC50000000            	sub esp,80
+    49 00000009 57                      	push edi
+    50 0000000A 56                      	push esi
+    51 0000000B 53                      	push ebx
+    52                                  
+    53                                  	;Fill bmp structure
+    54 0000000C 8B5D08                  	mov ebx,[ebp+8]
+    55                                  	movab bmW,[ebx]
+    56 0000000F FF33                <1>   push dword %2
+    57 00000011 8F45FC              <1>   pop dword %1
+    58                                  	movab bmH,[ebx+4]
+    59 00000014 FF7304              <1>   push dword %2
+    60 00000017 8F45F8              <1>   pop dword %1
+    61                                  	movab bmFS,[ebx+8]
+    62 0000001A FF7308              <1>   push dword %2
+    63 0000001D 8F45F4              <1>   pop dword %1
+    64                                  	movab bmBS,[ebx+12]
+    65 00000020 FF730C              <1>   push dword %2
+    66 00000023 8F45F0              <1>   pop dword %1
+    67                                  	
+    68 00000026 8B45FC                  	mov eax,bmW			
+    69 00000029 D1E8                    	shr eax,1
+    70 0000002B 8945D0                  	mov ixc,eax
+    71                                  	
+    72 0000002E 8B45F8                  	mov eax,bmH			
+    73 00000031 D1E8                    	shr eax,1
+    74 00000033 8945CC                  	mov iyc,eax
+    75                                  	
+    76                                  	;Random number seed
+    77 00000036 8B450C                  	mov eax,[ebp+12]	;rand
+    78 00000039 8945E4                  	mov irand,eax
+    79                                  
+    80                                  	;Angle
+    81 0000003C 8B5D10                  	mov ebx,[ebp+16]	;ptzang
+    82                                  	movab zang,[ebx]
+    83 0000003F FF33                <1>   push dword %2
+    84 00000041 8F45D4              <1>   pop dword %1
+    85                                  	
+    86                                  ;---------------------------------------------
+    87 00000044 8B4514                  	mov eax,[ebp+20]	;Get OpCode	1,2,4,8,16,,
+    88 00000047 3D04000000              	cmp eax,4
+    89 0000004C 770A                    	ja OpCode8
+    90                                  	
+    91                                  	;OpCodes = 1,2 or 4
+    92 0000004E E82E000000              	CALL RotateBytes
+    93 00000053 E91D000000              	jmp GETOUT
+    94                                  
+    95                                  OpCode8:
+    96                                  	
+    97 00000058 C1D804                  	rcr eax,4
+    98 0000005B 730A                    	jnc OpCode16
+    99                                  
+   100 0000005D E80D010000              	CALL DecrementColor
+   101 00000062 E90E000000              	jmp GETOUT
+   102                                  	
+   103                                  OpCode16:
+   104 00000067 D1D8                    	rcr eax,1
+   105 00000069 730A                    	jnc OpCode32
+   106                                  
+   107 0000006B E82C010000              	CALL BurningSpiral
+   108 00000070 E900000000              	jmp GETOUT
+   109                                  	
+   110                                  OpCode32:
+   111                                  
+   112                                  GETOUT:
+   113                                  
+   114 00000075 8B45E4                  	mov eax,irand	;Send random number seed back
+   115 00000078 5B                      	pop ebx
+   116 00000079 5E                      	pop esi
+   117 0000007A 5F                      	pop edi
+   118 0000007B 89EC                    	mov esp,ebp
+   119 0000007D 5D                      	pop ebp
+   120 0000007E C21000                  	ret 16
+   121                                  
+   122                                  ;--- Retrace  Slows things down
+   123                                  ;--- but avoids inteference sometimes
+   124                                  ;--- mov dx,03DAh in NT doubtful.
+   125                                  
+   126                                  ;mov   dx,03DAh    ;Status register 
+   127                                  ;WaitForOFF:      
+   128                                  ;in    al,dx     
+   129                                  ;test  al,8	  ;Is scan OFF
+   130                                  ;jnz   WaitForOFF  ;No, keep waiting
+   131                                  
+   132                                  ;WaitForON:
+   133                                  ;in    al,dx     
+   134                                  ;test  al,8	  ;Is scan ON
+   135                                  ;jz    WaitForON  ;No, keep waiting
+   136                                  
+   137                                  ;WaitForOFF2:      
+   138                                  ;in    al,dx     
+   139                                  ;test  al,8	  ;Is scan OFF
+   140                                  ;jnz   WaitForOFF2  ;No, keep waiting
+   141                                  
+   142                                  ;############################################################
+   143                                  
+   144                                  RotateBytes:
+   145                                  
+   146                                  ;zCos = Cos(zang)
+   147                                  ;zSin = Sin(zang)
+   148                                  ;ixc = bmW/2: iyc = bmH/2
+   149                                  ;For iy = bmH To 1 Step -1
+   150                                  ;For ix = bmW To 1 Step -1
+   151                                  ;   FrontSurf(ix, iy) = 0
+   152                                  ;   'For each FrontSurf point find rotated BackSurf source point
+   153                                  ;   ixs = ixc + (ix - ixc) * zCos -/+ (iy - iyc) * zSin
+   154                                  ;   If ixs < 1 Then Goto nexix
+   155                                  ;   If ixs > bmW Then Goto nexix
+   156                                  ;   iys = iyc + (iy - iyc) * zCos +/- (ix - ixc) * zSin
+   157                                  ;   If iys < 1 Then Goto nexix
+   158                                  ;   If iys > bmH Then Goto nexix
+   159                                  ;   'Move valid rotated BackSurf source points to FrontSurf
+   160                                  ;   FrontSurf(ix, iy) = BackSurf(ixs, iys)
+   161                                  ;nexix:
+   162                                  ;Next ix
+   163                                  ;Next iy
+   164                                  
+   165 00000081 D945D4                  	fld DWORD zang
+   166 00000084 D9FB                    	fsincos			;sin,cos
+   167 00000086 D95DBC                  	fstp DWORD zSin
+   168 00000089 D95DC0                  	fstp DWORD zCos
+   169                                  	
+   170 0000008C 8B5DF8                  	mov ebx,bmH		;iy
+   171                                  Nextiy:
+   172 0000008F 895DDC                  	mov iy,ebx
+   173 00000092 8B4DFC                  	mov ecx,bmW		;ix
+   174                                  Nextix:
+   175 00000095 894DE0                  	mov ix,ecx
+   176                                  	
+   177 00000098 8B7DF4                  	mov edi,bmFS	;->FrontSurf
+   178 0000009B 8B45DC                  	mov eax,iy
+   179 0000009E 48                      	dec eax
+   180 0000009F 8B55F8                  	mov edx,bmH
+   181 000000A2 F7E2                    	mul edx
+   182 000000A4 8B55E0                  	mov edx,ix
+   183 000000A7 4A                      	dec edx
+   184 000000A8 01D0                    	add eax,edx
+   185 000000AA 01C7                    	add edi,eax		;FrontSurf(ix,iy)
+   186 000000AC C60700                  	mov [edi],BYTE 0
+   187                                  
+   188                                  ;   ixs = ixc + (ix - ixc) * zCos -/+ (iy - iyc) * zSin
+   189 000000AF DB45D0                  	fild DWORD ixc	;ixc
+   190 000000B2 DB45E0                  	fild DWORD ix	;ix,ixc
+   191 000000B5 DEE9                    	fsubp ST1		;ix-ixc
+   192 000000B7 D945C0                  	fld DWORD zCos
+   193 000000BA DEC9                    	fmulp ST1		;(ix-ixc)zCos
+   194                                  	
+   195 000000BC DB45CC                  	fild DWORD iyc	;iyc
+   196 000000BF DB45DC                  	fild DWORD iy	;iy,iyc
+   197 000000C2 DEE9                    	fsubp ST1		;iy-iyc
+   198 000000C4 D945BC                  	fld DWORD zSin
+   199 000000C7 DEC9                    	fmulp ST1		;(iy-iyc)zSin
+   200                                  	
+   201 000000C9 8B4514                  	mov eax,[ebp+20]	;Get OpCode	1,2,4,8,16,,
+   202 000000CC D1D8                    	rcr eax,1
+   203 000000CE 7307                    	jnc AOp2
+   204 000000D0 DEE9                    	fsubp ST1			;OpCode=1 Rotate anti-clockwise
+   205 000000D2 E90D000000              	jmp ADO
+   206                                  AOp2:
+   207 000000D7 D1D8                    	rcr eax,1
+   208 000000D9 7307                    	jnc AOp4	
+   209 000000DB DEC1                    	faddp ST1			;OpCode=2 Rotate clockwise
+   210 000000DD E902000000              	jmp ADO
+   211                                  AOp4:
+   212 000000E2 DEC1                    	faddp ST1			;OpCode=4 Stretcher
+   213                                  ADO:
+   214 000000E4 DB45D0                  	fild DWORD ixc
+   215 000000E7 DEC1                    	faddp ST1
+   216 000000E9 DB5DC8                  	fistp DWORD ixs
+   217                                  	
+   218 000000EC 817DC801000000          	cmp ixs,DWORD 1
+   219 000000F3 726B                    	jb Decix
+   220 000000F5 8B45FC                  	mov eax,bmW
+   221 000000F8 3945C8                  	cmp ixs,eax
+   222 000000FB 7763                    	ja Decix
+   223                                  
+   224                                  ;   iys = iyc + (iy - iyc) * zCos +/- (ix - ixc) * zSin
+   225 000000FD DB45CC                  	fild DWORD iyc	;iyc
+   226 00000100 DB45DC                  	fild DWORD iy	;iy,iyc
+   227 00000103 DEE9                    	fsubp ST1		;iy-iyc
+   228 00000105 D945C0                  	fld DWORD zCos
+   229 00000108 DEC9                    	fmulp ST1		;(iy-iyc)zCos
+   230                                  
+   231 0000010A DB45D0                  	fild DWORD ixc	;ixc
+   232 0000010D DB45E0                  	fild DWORD ix	;ix,ixc
+   233 00000110 DEE9                    	fsubp ST1		;ix-ixc
+   234 00000112 D945BC                  	fld DWORD zSin
+   235 00000115 DEC9                    	fmulp ST1		;(ix-ixc)zSin
+   236                                  
+   237 00000117 8B4514                  	mov eax,[ebp+20]	;Get OpCode	1,2,4,8,16,,
+   238 0000011A D1D8                    	rcr eax,1
+   239 0000011C 7307                    	jnc BOp2
+   240 0000011E DEC1                    	faddp ST1			;OpCode=1 Rotate anti-clockwise
+   241 00000120 E90D000000              	jmp BDO
+   242                                  BOp2:
+   243 00000125 D1D8                    	rcr eax,1
+   244 00000127 7307                    	jnc BOp4	
+   245 00000129 DEE9                    	fsubp ST1			;OpCode=2 Rotate clockwise
+   246 0000012B E902000000              	jmp BDO
+   247                                  BOp4:
+   248 00000130 DEC1                    	faddp ST1			;OpCode=4 Stretcher
+   249                                  BDO:
+   250 00000132 DB45CC                  	fild DWORD iyc
+   251 00000135 DEC1                    	faddp ST1
+   252 00000137 DB5DC4                  	fistp DWORD iys
+   253                                  
+   254 0000013A 817DC401000000          	cmp iys,DWORD 1
+   255 00000141 721D                    	jb Decix
+   256 00000143 8B45F8                  	mov eax,bmH
+   257 00000146 3945C4                  	cmp iys,eax
+   258 00000149 7715                    	ja Decix
+   259                                  
+   260                                  ;   FrontSurf(ix, iy) = BackSurf(ixs, iys)
+   261 0000014B 8B75F0                  	mov esi,bmBS	;->BackSurf
+   262 0000014E 8B45C4                  	mov eax,iys
+   263 00000151 48                      	dec eax
+   264 00000152 8B55F8                  	mov edx,bmH
+   265 00000155 F7E2                    	mul edx
+   266 00000157 8B55C8                  	mov edx,ixs
+   267 0000015A 4A                      	dec edx
+   268 0000015B 01D0                    	add eax,edx
+   269 0000015D 01C6                    	add esi,eax		;BackSurf(ixs,iys)
+   270 0000015F A4                      	movsb			;[edi] <- [esi]
+   271                                  	
+   272                                  Decix:
+   273 00000160 49                      	dec ecx
+   274 00000161 0F852EFFFFFF            	jnz NEAR Nextix
+   275 00000167 4B                      	dec ebx
+   276 00000168 0F8521FFFFFF            	jnz NEAR Nextiy
+   277 0000016E C3                      ret
+   278                                  
+   279                                  ;############################################################
+   280                                  
+   281                                  ;	CPU DECREMENT COLOR NUMBER EVERWHERE ON FRONT SURFACE
+   282                                  ;	OpCode = 8
+   283                                  
+   284                                  DecrementColor:
+   285 0000016F 8B7DF4                  	mov edi,bmFS	;->Front surface
+   286 00000172 8B45F8                  	mov eax,bmH
+   287 00000175 8B5DFC                  	mov ebx,bmW
+   288 00000178 F7E3                    	mul ebx			;Number of bytes in FrontSurf array
+   289 0000017A 89C1                    	mov ecx,eax
+   290 0000017C B3FF                    	mov bl,255		;For changing color number 1
+   291                                  nextedi:
+   292 0000017E 8A17                    	mov dl,[edi]	;Pick up color number
+   293 00000180 80FA00                  	cmp dl,0		;Leave color number = 0 alone
+   294 00000183 7412                    	je skip0
+   295                                  	
+   296 00000185 80FA04                  	cmp dl,4
+   297 00000188 7707                    	ja decit
+   298                                  	
+   299 0000018A 881F                    	mov [edi],bl	;Make color number2 1 to 4 = 255
+   300 0000018C E906000000              	jmp skip0
+   301                                  decit:
+   302 00000191 FECA                    	dec dl			;Decrement color number by 2
+   303 00000193 FECA                    	dec dl			;Can decrement by 1 but slower
+   304 00000195 8817                    	mov [edi],dl
+   305                                  skip0:	
+   306 00000197 47                      	inc edi
+   307 00000198 49                      	dec ecx
+   308 00000199 75E3                    	jnz nextedi
+   309 0000019B C3                      ret
+   310                                  
+   311                                  ;############################################################
+   312                                  
+   313                                  ;	BURNING SPIRAL
+   314                                  ALIGN
+   315                                  
+   316                                  BurningSpiral:
+   317                                  
+   318                                  ;SEEDING ALONG SPIRAL
+   319                                  ;ixc = 128: iyc = 128
+   320                                  ;zA = 2   'More open then other spiral
+   321                                  ;cul = 1
+   322                                  ;For zang = 0 To 16 * pi# Step 0.01
+   323                                  ;   ix = ixc + zA * zang * Cos(zang)
+   324                                  ;	If ix < 1 or ix > 256 goto nexzang
+   325                                  ;   iy = iyc + zA * zang * Sin(zang)
+   326                                  ;	If iy < 1 or iy > 256 goto nexzang
+   327                                  ;   FrontSurf(ix, iy) = cul
+   328                                  ;   If cul = 255 Then cul = 0
+   329                                  ;   cul = cul + 1
+   330                                  ;nexzang
+   331                                  ;Next zang
+   332                                  
+   333                                  ;Available
+   334                                  ;%define ix    [ebp-20]
+   335                                  ;%define iy    [ebp-24]
+   336                                  ;%define zA    [ebp-28]	;/ Int(2)
+   337                                  ;%define zang  [ebp-32]	;/ 0 start
+   338                                  ;%define ixc   [ebp-36]	;/
+   339                                  ;%define iyc   [ebp-40]	;/
+   340                                  ;%define ixs   [ebp-44]
+   341                                  ;%define iys   [ebp-48]
+   342                                  ;%define zCos  [ebp-52]
+   343                                  ;%define zSin  [ebp-56]
+   344                                  ;%define zangStep  [ebp-60]	;.01
+   345                                  ;%define zangLim   [ebp-64]	;16*pi# =~ Int(50)
+   346                                  ;%define intzang   [ebp-68]	;Int(zang)
+   347                                  
+   348 0000019C B802000000              	mov eax,2
+   349 000001A1 8945D8                  	mov zA,eax
+   350                                  
+   351 000001A4 B864000000              	mov eax,100
+   352 000001A9 8945B8                  	mov zangStep,eax
+   353 000001AC D9E8                    	fld1					;1
+   354 000001AE DB45B8                  	fild DWORD zangStep		;100,1
+   355 000001B1 DEF9                    	fdivp ST1				;.01
+   356 000001B3 D95DB8                  	fstp DWORD zangStep
+   357                                  
+   358 000001B6 B832000000              	mov eax,50
+   359 000001BB 8945B4                  	mov zangLim,eax
+   360                                  	
+   361                                  ;For zang = 0 To zangLim Step zangStep
+   362                                  ;   ix = ixc + zA * zang * Cos(zang)
+   363                                  ;	If ix < 1 or ix > 256 goto nexzang
+   364                                  ;   iy = iyc + zA * zang * Sin(zang)
+   365                                  ;	If iy < 1 or iy > 256 goto nexzang
+   366                                  ;   FrontSurf(ix, iy) = cul
+   367                                  ;   If cul = 255 Then cul = 0
+   368                                  ;   cul = cul + 1
+   369                                  ;nexzang
+   370                                  ;Next zang
+   371                                  
+   372                                  
+   373 000001BE B801000000              	mov eax,DWORD 1
+   374 000001C3 8945EC                  	mov lo32,eax
+   375                                  	
+   376 000001C6 E835000000              	CALL DrawSpiral
+   377                                  	;mov eax,iyc
+   378                                  	;inc eax
+   379                                  	;mov iyc,eax
+   380                                  	;CALL DrawSpiral
+   381                                  	;mov eax,iyc
+   382                                  	;inc eax
+   383                                  	;mov iyc,eax
+   384                                  	;CALL DrawSpiral
+   385                                  	
+   386 000001CB B802000000              	mov eax,DWORD 2
+   387 000001D0 8945EC                  	mov lo32,eax
+   388                                  
+   389 000001D3 E828000000              	CALL DrawSpiral
+   390                                  	
+   391                                  	
+   392 000001D8 66BADA03                mov   dx,03DAh    ;Status register 
+   393                                  WaitForOFF:      
+   394 000001DC EC                      in    al,dx     
+   395 000001DD A808                    test  al,8	  ;Is scan OFF
+   396 000001DF 75FB                    jnz   WaitForOFF  ;No, keep waiting
+   397                                  
+   398                                  WaitForON:
+   399 000001E1 EC                      in    al,dx     
+   400 000001E2 A808                    test  al,8	  ;Is scan ON
+   401 000001E4 74FB                    jz    WaitForON	  ;No, keep waiting
+   402                                  
+   403                                  
+   404 000001E6 C3                      ret
+   405                                  
+   406                                  ;############################################################
+   407                                  ;	RANDOM NUMBERS IN EAX SEED IN irand
+   408                                  
+   409                                  Rando:
+   410 000001E7 B80B180100              	mov eax,01180Bh
+   411 000001EC F76DE4                  	imul DWORD irand
+   412 000001EF 0509B20A00              	add eax, 0AB209h
+   413 000001F4 D1D8                    	rcr eax,1
+   414 000001F6 7204                    	jc ok
+   415 000001F8 0FC8                    	bswap eax
+   416 000001FA D1C0                    	rol eax,1
+   417                                  ok:
+   418 000001FC 8945E4                  	mov irand,eax
+   419 000001FF C3                      ret
+   420                                  
+   421                                  ;############################################################
+   422                                  DrawSpiral:
+   423 00000200 D9EE                    	fldz
+   424 00000202 D95DD4                  	fstp DWORD zang
+   425                                  
+   426                                  NextZang:	
+   427 00000205 D945D4                  	fld DWORD zang
+   428 00000208 D9FF                    	fcos
+   429 0000020A DB45D8                  	fild DWORD zA
+   430 0000020D DEC9                    	fmulp ST1
+   431 0000020F D945D4                  	fld DWORD zang
+   432 00000212 DEC9                    	fmulp ST1
+   433                                  	
+   434 00000214 DB45D0                  	fild DWORD ixc
+   435 00000217 DEC1                    	faddp ST1
+   436 00000219 DB5DE0                  	fistp DWORD ix	;ix = ixc + zA * zang * Cos(zang)
+   437                                  	
+   438 0000021C 8B45E0                  	mov eax,ix
+   439 0000021F 3D01000000              	cmp eax,DWORD 1	;If ix < 1 or ix > bmW goto nexzang
+   440 00000224 0F8CA0000000            	jl NEAR nexzang
+   441 0000022A 3B45FC                  	cmp eax,bmW
+   442 0000022D 0F8F97000000            	jg NEAR nexzang
+   443                                  	
+   444 00000233 D945D4                  	fld DWORD zang
+   445 00000236 D9FE                    	fsin
+   446 00000238 DB45D8                  	fild DWORD zA
+   447 0000023B DEC9                    	fmulp ST1
+   448 0000023D D945D4                  	fld DWORD zang
+   449 00000240 DEC9                    	fmulp ST1
+   450                                  
+   451 00000242 DB45CC                  	fild DWORD iyc
+   452 00000245 DEC1                    	faddp ST1
+   453 00000247 DB5DDC                  	fistp DWORD iy	;iy = iyc + zA * zang * Sin(zang)
+   454                                  
+   455 0000024A 8B45DC                  	mov eax,iy
+   456 0000024D 3D01000000              	cmp eax,DWORD 1	;If iy < 1 or iy > bmH goto nexzang
+   457 00000252 0F8C72000000            	jl NEAR nexzang
+   458 00000258 3B45F8                  	cmp eax,bmH
+   459 0000025B 0F8F69000000            	jg NEAR nexzang
+   460                                  	
+   461                                  
+   462 00000261 8B7DF4                  	mov edi,bmFS	;->FrontSurf
+   463 00000264 8B45DC                  	mov eax,iy
+   464 00000267 48                      	dec eax
+   465 00000268 8B5DF8                  	mov ebx,bmH
+   466 0000026B F7E3                    	mul ebx
+   467 0000026D 8B5DE0                  	mov ebx,ix
+   468 00000270 4B                      	dec ebx
+   469 00000271 01D8                    	add eax,ebx
+   470 00000273 01C7                    	add edi,eax		;FrontSurf(ix,iy)
+   471                                  
+   472 00000275 8B45EC                  	mov eax,lo32
+   473 00000278 3D01000000              	cmp eax,1
+   474 0000027D 750C                    	jne Burn
+   475                                  
+   476 0000027F E863FFFFFF              	CALL Rando		;ran num in eax
+   477 00000284 8807                    	mov [edi],al
+   478 00000286 E93F000000              	jmp nexzang
+   479                                  	
+   480                                  Burn:
+   481 0000028B B90B000000              	mov ecx,DWORD 11
+   482                                  Burn2:	
+   483 00000290 8B45FC                  	mov eax,bmW
+   484 00000293 01C7                    	add edi,eax
+   485                                  	
+   486 00000295 6631D2                    	xor dx,dx             ;Sum up 4 colors
+   487                                   	
+   488 00000298 8A9700FFFFFF              	mov dl,[edi-256]      ;Line below
+   489 0000029E 6689D0                    	mov ax,dx             ;ax = dx
+   490 000002A1 8A97FFFEFFFF              	mov dl,[edi-257]      ;Line below right
+   491 000002A7 6601D0                    	add ax,dx             ;sum
+   492 000002AA 8A9701FFFFFF              	mov dl,[edi-255]      ;Line below left
+   493 000002B0 6601D0                    	add ax,dx             ;sum
+   494 000002B3 8A9700FEFFFF              	mov dl,[edi-512]      ;2 Lines below
+   495 000002B9 6601D0                    	add ax,dx             ;sum
+   496 000002BC 66C1E802                  	shr ax,2              ;/4 average
+   497 000002C0 7303                      	jnc StoreCul
+   498 000002C2 66D1E8                    	shr ax,1              ;/2 average
+   499                                    
+   500                                  ;  	cmp ax,1
+   501                                  ;  	jle StoreCul          ;ax=0,1 color num?
+   502                                  ;  	dec ax                ;no move towards 0 ie black
+   503                                  ;  	dec ax                ;no move towards 0 ie black
+   504                                  StoreCul:
+   505                                  
+   506 000002C5 8807                      	mov [edi],al          ;put the new pixel value back in the array.
+   507 000002C7 49                      	dec ecx
+   508 000002C8 75C6                    	jnz Burn2
+   509                                  
+   510                                  nexzang:
+   511                                  
+   512 000002CA D945D4                  	fld DWORD zang
+   513 000002CD D945B8                  	fld DWORD zangStep
+   514 000002D0 DEC1                    	faddp ST1
+   515 000002D2 D955D4                  	fst DWORD zang
+   516                                  
+   517 000002D5 DB5DB0                  	fistp DWORD intzang
+   518 000002D8 8B45B0                  	mov eax,intzang
+   519 000002DB 3B45B4                  	cmp eax,zangLim
+   520                                  
+   521 000002DE 0F8C21FFFFFF            	jl NEAR NextZang
+   522                                  	
+   523 000002E4 9BDBE3                  	finit
+   524                                  
+   525 000002E7 C3                      RET
